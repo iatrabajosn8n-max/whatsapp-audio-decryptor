@@ -1,6 +1,15 @@
 import express from "express";
 import fetch from "node-fetch";
 import crypto from "crypto";
+console.log("🚀 Iniciando servidor de WhatsApp Audio Decryptor...");
+
+process.on("uncaughtException", (err) => {
+  console.error("❌ Error no controlado:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ Promesa rechazada sin capturar:", reason);
+});
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
