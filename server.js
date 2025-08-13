@@ -1,41 +1,31 @@
-import express from 'express';
-import fetch from 'node-fetch';
-import { decryptMedia } from 'whatsapp-web.js';
+import express from "express";
+import fetch from "node-fetch";
+import pkg from "whatsapp-web.js";
+
+const { decryptMedia } = pkg;
 
 const app = express();
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json());
 
-app.post('/decrypt-audio', async (req, res) => {
-    try {
-        const { mediaKey, directPath } = req.body;
+app.post("/decrypt-audio", async (req, res) => {
+  try {
+    const { url, mimetype, mediaKey } = req.body;
 
-        if (!mediaKey || !directPath) {
-            return res.status(400).json({ error: 'Faltan parámetros: mediaKey o directPath' });
-        }
+    const response = await fetch(url);
+    const encBuffer = Buffer.from(await response.arrayBuffer());
 
-        const fileUrl = `https://mmg.whatsapp.net${directPath}`;
-        const response = await fetch(fileUrl);
-        const encBuffer = Buffer.from(await response.arrayBuffer());
+    const decrypted = await decryptMedia(
+      { mediaKey: Buffer.from(mediaKey, "base64"), mimetype },
+      encBuffer
+    );
 
-        const decrypted = await decryptMedia(
-            {
-                mediaKey: Buffer.from(mediaKey, 'base64'),
-                mediaType: 'audio',
-                mimetype: 'audio/ogg; codecs=opus'
-            },
-            { data: encBuffer }
-        );
-
-        res.setHeader('Content-Type', 'audio/ogg');
-        res.send(decrypted);
-
-    } catch (err) {
-        console.error('Error desencriptando audio:', err);
-        res.status(500).json({ error: err.message });
-    }
+    res.setHeader("Content-Type", mimetype);
+    res.send(decrypted);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error decrypting audio");
+  }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor escuchando en puerto ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
