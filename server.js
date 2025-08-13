@@ -9,16 +9,18 @@ const upload = multer();
 // Función para derivar la AES key y IV desde la mediaKey usando HKDF
 function getAESKeyAndIV(mediaKey) {
     const info = Buffer.from("WhatsApp Audio Keys", "utf-8");
-    const expandedKey = crypto.hkdfSync(
+    const expandedKey = Buffer.alloc(112); // Prepara el espacio
+    crypto.hkdfSync(
         "sha256",
         mediaKey,
         Buffer.alloc(32, 0),
         info,
-        112
+        expandedKey
     );
+
     return {
-        aesKey: expandedKey.subarray(0, 32),
-        iv: expandedKey.subarray(32, 48)
+        aesKey: expandedKey.slice(0, 32),
+        iv: expandedKey.slice(32, 48)
     };
 }
 
