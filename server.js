@@ -8,13 +8,19 @@ app.use(express.json({ limit: "50mb" }));
 
 app.post("/decrypt", async (req, res) => {
   try {
-    const { url, mimetype, mediaKey } = req.body;
+    // Recibe el JSON entero
+    const data = req.body;
+
+    // Buscar los parámetros dentro del JSON
+    const url = data?.rawMessage?.audioMessage?.url;
+    const mimetype = data?.rawMessage?.audioMessage?.mimetype;
+    const mediaKey = data?.rawMessage?.audioMessage?.mediaKey;
 
     if (!url || !mimetype || !mediaKey) {
-      return res.status(400).json({ error: "Faltan parámetros" });
+      return res.status(400).json({ error: "No se encontraron parámetros en el JSON" });
     }
 
-    // Crear un objeto 'Message' simulado para whatsapp-web.js
+    // Crear objeto simulado para whatsapp-web.js
     const message = {
       _data: {
         mimetype: mimetype,
@@ -23,7 +29,6 @@ app.post("/decrypt", async (req, res) => {
       },
       client: {
         options: {
-          // Simular usuario-agente para que WhatsApp no bloquee
           userAgent: "WhatsApp/2.23.10 iOS"
         }
       }
@@ -32,7 +37,7 @@ app.post("/decrypt", async (req, res) => {
     // Desencriptar
     const decrypted = await decryptMedia(message);
 
-    // Convertir a base64 para que n8n lo pueda guardar
+    // Pasar a base64
     const base64Audio = Buffer.from(decrypted).toString("base64");
 
     res.json({
