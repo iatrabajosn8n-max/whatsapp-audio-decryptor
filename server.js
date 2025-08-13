@@ -1,11 +1,9 @@
 import express from "express";
-import multer from "multer";
 import crypto from "crypto";
+import fetch from "node-fetch"; // Necesario instalar: npm install node-fetch
 
 const app = express();
-const upload = multer();
-
-app.use(express.json());
+app.use(express.json()); // Parsear JSON en request body
 
 // Función para derivar la AES key y IV desde la mediaKey usando HKDF
 function getAESKeyAndIV(mediaKey) {
@@ -14,7 +12,7 @@ function getAESKeyAndIV(mediaKey) {
     const expandedKey = crypto.hkdfSync(
         "sha256",
         mediaKey,
-        Buffer.alloc(32, 0), // salt de 32 bytes a cero
+        Buffer.alloc(32, 0),
         info,
         112
     );
@@ -48,15 +46,13 @@ async function decryptWhatsAppAudio(mediaKeyBase64, encUrl) {
     return decrypted;
 }
 
-// Endpoint para recibir webhook y procesar audio
-app.post("/webhook", upload.any(), async (req, res) => {
+// Endpoint webhook
+app.post("/webhook", async (req, res) => {
     try {
-        console.log("Fields recibidos:", req.body);
-        console.log("Archivos recibidos:", req.files);
-
         const message = req.body?.data?.messages?.message;
 
-        if (!message?.audioMessage) {
+        if (!message?.audioMessage?.mediaKey || !message?.audioMessage?.url) {
+            console.log("Payload recibido sin audio:", JSON.stringify(req.body, null, 2));
             return res.status(400).send("No hay audio en el mensaje");
         }
 
