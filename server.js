@@ -1,64 +1,82 @@
-import express from 'express';
-import multer from 'multer';
-import crypto from 'crypto';
+import express from "express";
+import multer from "multer";
+import fetch from "node-fetch";
+import crypto from "crypto";
 
 const app = express();
 const upload = multer();
+app.use(express.json());
 
-// Constantes para el desencriptado de WhatsApp
-const IV_LENGTH = 16;
-const CIPHER_KEY_LENGTH = 32;
-const MAC_KEY_LENGTH = 32;
-const WHATSAPP_AUDIO_INFO = 'WhatsApp Audio Keys';
+// Función para derivar la AES key y IV desde la mediaKey usando HKDF
+function getAESKeyAndIV(mediaKey) {
+    // "WhatsApp Audio Keys" es el info string para audios
+    const info = Buffer.from("WhatsApp Audio Keys", "utf-8");
 
-function deriveKeys(mediaKeyBase64) {
-    const mediaKey = Buffer.from(mediaKeyBase64, 'base64');
-    const expandedKey = crypto.createHmac('sha256', mediaKey)
-        .update(Buffer.from(WHATSAPP_AUDIO_INFO, 'utf-8'))
-        .digest();
+    // Deriva 112 bytes desde mediaKey con HKDF (SHA256)
+    const expandedKey = crypto.hkdfSync(
+        "sha256",
+        mediaKey,              // mediaKey original
+        Buffer.alloc(32, 0),   // salt de 32 bytes a cero
+        info,                  // info string
+        112                    // longitud total derivada
+    );
 
     return {
-        iv: expandedKey.subarray(0, IV_LENGTH),
-        cipherKey: expandedKey.subarray(IV_LENGTH, IV_LENGTH + CIPHER_KEY_LENGTH),
-        macKey: expandedKey.subarray(IV_LENGTH + CIPHER_KEY_LENGTH, IV_LENGTH + CIPHER_KEY_LENGTH + MAC_KEY_LENGTH),
+        aesKey: expandedKey.subarray(0, 32),   // primeros 32 bytes para AES-256
+        iv: expandedKey.subarray(32, 48)       // siguientes 16 bytes para IV
     };
 }
 
-function decryptWhatsAppAudio(encBuffer, mediaKeyBase64) {
-    const keys = deriveKeys(mediaKeyBase64);
+// Función para descargar y descifrar audio de WhatsApp
+async function decryptWhatsAppAudio(mediaKeyBase64, encUrl) {
+    console.log("MediaKey recibida:", mediaKeyBase64);
 
-    // Quitar el último bloque de 10 bytes del MAC
-    const fileData = encBuffer.subarray(0, encBuffer.length - 10);
+    // Convierte la mediaKey de Base64 a bytes
+    const mediaKey = Buffer.from(mediaKeyBase64, "base64");
+    console.log("Bytes de mediaKey:", mediaKey.length);
 
-    const decipher = crypto.createDecipheriv('aes-256-cbc', keys.cipherKey, keys.iv);
-    let decrypted = decipher.update(fileData);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    // Derivar clave AES e IV
+    const { aesKey, iv } = getAESKeyAndIV(mediaKey);
+    console.log("AES Key length:", aesKey.length);
+    console.log("IV length:", iv.length);
+
+    // Descargar archivo encriptado
+    const response = await fetch(encUrl);
+    const encBuffer = Buffer.from(await response.arrayBuffer());
+
+    // Desencriptar usando AES-256-CBC
+    const decipher = crypto.createDecipheriv("aes-256-cbc", aesKey, iv);
+    const decrypted = Buffer.concat([
+        decipher.update(encBuffer),
+        decipher.final()
+    ]);
 
     return decrypted;
 }
 
-app.post('/decrypt-multipart', upload.single('encAudio'), (req, res) => {
-    console.log("MediaKey recibida:", req.body.mediaKey);
-    console.log("Longitud Base64:", req.body.mediaKey?.length || "VACÍA");
-
-    const mediaKeyBuffer = Buffer.from(req.body.mediaKey, 'base64');
-    console.log("Bytes de mediaKey:", mediaKeyBuffer.length);
-
+// Endpoint para recibir webhook y procesar audio
+app.post("/webhook", upload.none(), async (req, res) => {
     try {
-        const mediaKey = req.body.mediaKey;
-        const encAudioBuffer = req.file.buffer;
+        const message = req.body?.data?.messages?.message;
+        if (!message?.audioMessage) {
+            return res.status(400).send("No hay audio en el mensaje");
+        }
 
-        const decryptedBuffer = decryptWhatsAppAudio(encAudioBuffer, mediaKey);
+        const mediaKey = message.audioMessage.mediaKey;
+        const url = message.audioMessage.url;
 
-        res.setHeader('Content-Type', 'audio/ogg');
-        res.send(decryptedBuffer);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error al desencriptar el audio' });
+        // Descifra el audio
+        const audioBuffer = await decryptWhatsAppAudio(mediaKey, url);
+
+        // Responder con el archivo descifrado (por ejemplo, .ogg)
+        res.setHeader("Content-Type", "audio/ogg");
+        res.send(audioBuffer);
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Error al procesar el audio");
     }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor escuchando en puerto ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
