@@ -35,22 +35,37 @@ app.post("/decrypt", async (req, res) => {
   try {
     const { url, mediaKey, mimetype } = req.body;
 
+    console.log("📩 Datos recibidos:", { url, mediaKey, mimetype });
+
     if (!url || !mediaKey || !mimetype) {
       return res.status(400).json({ error: "Faltan parámetros" });
     }
 
-    // Descargar el archivo .enc desde WhatsApp
+    // Descargar el archivo encriptado
     const response = await fetch(url);
     if (!response.ok) {
+      console.error("❌ Error descargando archivo:", response.status, response.statusText);
       return res.status(500).json({ error: "Error descargando el archivo" });
     }
-    const encBuffer = Buffer.from(await response.arrayBuffer());
+    const encBuffer = await response.arrayBuffer();
+    console.log("📦 Tamaño del archivo descargado:", encBuffer.byteLength);
+
+    // Simular mensaje para whatsapp-web.js
+    const message = {
+      mimetype,
+      mediaKey,
+      type: "audio",
+      _data: { body: Buffer.from(encBuffer) }
+    };
+
+    console.log("🔍 Intentando desencriptar...");
 
     // Desencriptar
-    const decrypted = await decryptWhatsAppAudio(encBuffer, mediaKey, mimetype);
+    const decrypted = await decryptMedia(message);
+    console.log("✅ Desencriptado con éxito, tamaño:", decrypted.length);
 
-    // Convertir a Base64
-    const base64Audio = decrypted.toString("base64");
+    // Devolver como Base64 para n8n
+    const base64Audio = Buffer.from(decrypted).toString("base64");
 
     res.json({
       fileName: "audio.ogg",
@@ -59,10 +74,7 @@ app.post("/decrypt", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ Error exacto:", err);
     res.status(500).json({ error: "Error desencriptando", details: err.message });
   }
 });
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
