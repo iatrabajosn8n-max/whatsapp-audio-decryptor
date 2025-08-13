@@ -1,14 +1,13 @@
 import express from "express";
+import multer from "multer";
 import crypto from "crypto";
-import fetch from "node-fetch"; // Necesario instalar: npm install node-fetch
 
 const app = express();
-app.use(express.json({ limit: "10mb" })); // Aceptar JSON grandes
+const upload = multer();
 
 // Función para derivar la AES key y IV desde la mediaKey usando HKDF
 function getAESKeyAndIV(mediaKey) {
     const info = Buffer.from("WhatsApp Audio Keys", "utf-8");
-
     const expandedKey = crypto.hkdfSync(
         "sha256",
         mediaKey,
@@ -23,20 +22,10 @@ function getAESKeyAndIV(mediaKey) {
     };
 }
 
-// Función para descargar y descifrar audio de WhatsApp
-async function decryptWhatsAppAudio(mediaKeyBase64, encUrl) {
-    console.log("MediaKey recibida:", mediaKeyBase64);
-
+// Función para descifrar audio
+function decryptWhatsAppAudio(mediaKeyBase64, encBuffer) {
     const mediaKey = Buffer.from(mediaKeyBase64, "base64");
-
     const { aesKey, iv } = getAESKeyAndIV(mediaKey);
-    console.log("AES Key length:", aesKey.length);
-    console.log("IV length:", iv.length);
-
-    const response = await fetch(encUrl);
-    if (!response.ok) throw new Error(`Error al descargar archivo: ${response.statusText}`);
-
-    const encBuffer = Buffer.from(await response.arrayBuffer());
 
     const decipher = crypto.createDecipheriv("aes-256-cbc", aesKey, iv);
     const decrypted = Buffer.concat([
@@ -47,43 +36,31 @@ async function decryptWhatsAppAudio(mediaKeyBase64, encUrl) {
     return decrypted;
 }
 
-// Función para buscar recursivamente mediaKey y url
-function findAudioFields(obj) {
-    let result = { mediaKey: null, url: null };
-
-    function search(o) {
-        if (typeof o !== "object" || o === null) return;
-        if (o.mediaKey && o.url) {
-            result.mediaKey = o.mediaKey;
-            result.url = o.url;
-        }
-        for (let key in o) {
-            search(o[key]);
-        }
-    }
-
-    search(obj);
-    return result;
-}
-
-// Endpoint webhook
-app.post("/webhook", async (req, res) => {
+// Endpoint para recibir el form-data desde n8n
+app.post("/webhook", upload.fields([
+    { name: "mediaKey", maxCount: 1 },
+    { name: "encAudio", maxCount: 1 }
+]), (req, res) => {
     try {
-        console.log("Payload recibido:", JSON.stringify(req.body, null, 2));
+        const mediaKey = req.body?.mediaKey;
+        const encAudioFile = req.files?.encAudio?.[0];
 
-        const { mediaKey, url } = findAudioFields(req.body);
-
-        if (!mediaKey || !url) {
-            return res.status(400).send("No se encontraron mediaKey y url en el payload");
+        if (!mediaKey || !encAudioFile) {
+            return res.status(400).send("No se recibieron mediaKey o encAudio");
         }
 
-        const audioBuffer = await decryptWhatsAppAudio(mediaKey, url);
+        // Archivo cifrado en buffer
+        const encBuffer = encAudioFile.buffer;
 
+        // Descifrar
+        const audioBuffer = decryptWhatsAppAudio(mediaKey, encBuffer);
+
+        // Responder con el archivo descifrado
         res.setHeader("Content-Type", "audio/ogg");
         res.send(audioBuffer);
 
     } catch (err) {
-        console.error(err);
+        console.error("Error al procesar el audio:", err);
         res.status(500).send("Error al procesar el audio");
     }
 });
