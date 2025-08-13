@@ -38,6 +38,12 @@ function decryptWhatsAppAudio(encBuffer, mediaKeyBase64) {
 }
 
 app.post('/decrypt-multipart', upload.single('encAudio'), (req, res) => {
+    console.log("MediaKey recibida:", req.body.mediaKey);
+    console.log("Longitud Base64:", req.body.mediaKey?.length || "VACÍA");
+
+    const mediaKeyBuffer = Buffer.from(req.body.mediaKey, 'base64');
+    console.log("Bytes de mediaKey:", mediaKeyBuffer.length);
+
     try {
         const mediaKey = req.body.mediaKey;
         const encAudioBuffer = req.file.buffer;
