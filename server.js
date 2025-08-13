@@ -3,7 +3,7 @@ import crypto from "crypto";
 import fetch from "node-fetch"; // Necesario instalar: npm install node-fetch
 
 const app = express();
-app.use(express.json()); // Parsear JSON en request body
+app.use(express.json({ limit: "10mb" })); // Aceptar JSON grandes
 
 // Función para derivar la AES key y IV desde la mediaKey usando HKDF
 function getAESKeyAndIV(mediaKey) {
@@ -28,13 +28,14 @@ async function decryptWhatsAppAudio(mediaKeyBase64, encUrl) {
     console.log("MediaKey recibida:", mediaKeyBase64);
 
     const mediaKey = Buffer.from(mediaKeyBase64, "base64");
-    console.log("Bytes de mediaKey:", mediaKey.length);
 
     const { aesKey, iv } = getAESKeyAndIV(mediaKey);
     console.log("AES Key length:", aesKey.length);
     console.log("IV length:", iv.length);
 
     const response = await fetch(encUrl);
+    if (!response.ok) throw new Error(`Error al descargar archivo: ${response.statusText}`);
+
     const encBuffer = Buffer.from(await response.arrayBuffer());
 
     const decipher = crypto.createDecipheriv("aes-256-cbc", aesKey, iv);
@@ -46,18 +47,35 @@ async function decryptWhatsAppAudio(mediaKeyBase64, encUrl) {
     return decrypted;
 }
 
+// Función para buscar recursivamente mediaKey y url
+function findAudioFields(obj) {
+    let result = { mediaKey: null, url: null };
+
+    function search(o) {
+        if (typeof o !== "object" || o === null) return;
+        if (o.mediaKey && o.url) {
+            result.mediaKey = o.mediaKey;
+            result.url = o.url;
+        }
+        for (let key in o) {
+            search(o[key]);
+        }
+    }
+
+    search(obj);
+    return result;
+}
+
 // Endpoint webhook
 app.post("/webhook", async (req, res) => {
     try {
-        const message = req.body?.data?.messages?.message;
+        console.log("Payload recibido:", JSON.stringify(req.body, null, 2));
 
-        if (!message?.audioMessage?.mediaKey || !message?.audioMessage?.url) {
-            console.log("Payload recibido sin audio:", JSON.stringify(req.body, null, 2));
-            return res.status(400).send("No hay audio en el mensaje");
+        const { mediaKey, url } = findAudioFields(req.body);
+
+        if (!mediaKey || !url) {
+            return res.status(400).send("No se encontraron mediaKey y url en el payload");
         }
-
-        const mediaKey = message.audioMessage.mediaKey;
-        const url = message.audioMessage.url;
 
         const audioBuffer = await decryptWhatsAppAudio(mediaKey, url);
 
