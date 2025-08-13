@@ -1,12 +1,10 @@
 import express from "express";
 import multer from "multer";
 import crypto from "crypto";
-import fetch from "node-fetch"; // Necesario para descargar el audio
 
 const app = express();
 const upload = multer();
 
-// Middleware para JSON normal
 app.use(express.json());
 
 // Función para derivar la AES key y IV desde la mediaKey usando HKDF
@@ -53,11 +51,9 @@ async function decryptWhatsAppAudio(mediaKeyBase64, encUrl) {
 // Endpoint para recibir webhook y procesar audio
 app.post("/webhook", upload.any(), async (req, res) => {
     try {
-        // Log completo para inspección
         console.log("Fields recibidos:", req.body);
         console.log("Archivos recibidos:", req.files);
 
-        // Aquí asumimos que el JSON viene en req.body
         const message = req.body?.data?.messages?.message;
 
         if (!message?.audioMessage) {
