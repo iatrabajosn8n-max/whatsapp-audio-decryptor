@@ -1,62 +1,45 @@
 import express from "express";
-import axios from "axios";
 import crypto from "crypto";
 
 const app = express();
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "20mb" }));
 
-// --- Función para derivar la clave de WhatsApp ---
-function getMediaKeys(mediaKeyBase64) {
-    const mediaKey = Buffer.from(mediaKeyBase64, "base64");
-    const expandedKey = crypto.createHmac("sha256", mediaKey)
-        .update("WhatsApp Audio Keys")
-        .digest();
-    return expandedKey;
+function hkdf(mediaKey, info) {
+  return crypto.hkdfSync("sha256", mediaKey, Buffer.alloc(0), Buffer.from(info), 112);
 }
 
-// --- Función para desencriptar ---
-async function decryptAudio(url, mediaKeyBase64) {
-    const fileEnc = await axios.get(url, { responseType: "arraybuffer" });
-    const fileData = Buffer.from(fileEnc.data);
+app.post("/decrypt", (req, res) => {
+  try {
+    const { mediaKey: mediaKeyB64, file: fileB64 } = req.body;
 
-    const iv = fileData.subarray(0, 16);
-    const ciphertext = fileData.subarray(16, fileData.length - 10);
-
-    const expandedKey = getMediaKeys(mediaKeyBase64);
-    const decipher = crypto.createDecipheriv("aes-256-cbc", expandedKey, iv);
-
-    let decrypted = decipher.update(ciphertext);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
-
-    return decrypted;
-}
-
-// --- Ruta principal ---
-app.post("/decrypt", async (req, res) => {
-    try {
-        const audioMessage = req.body?.rawMessage?.audioMessage;
-        if (!audioMessage || !audioMessage.url || !audioMessage.mediaKey || !audioMessage.mimetype) {
-            return res.status(400).json({ error: "JSON inválido o faltan campos" });
-        }
-
-        const { url, mediaKey, mimetype } = audioMessage;
-        console.log("📥 Recibido:", url, mimetype, mediaKey);
-
-        const audioBuffer = await decryptAudio(url, mediaKey);
-
-        // Convertir a Base64
-        const audioBase64 = audioBuffer.toString("base64");
-
-        res.json({
-            mimetype,
-            base64: audioBase64
-        });
-
-    } catch (err) {
-        console.error("❌ Error desencriptando:", err.message);
-        res.status(500).json({ error: "Error desencriptando" });
+    if (!mediaKeyB64 || !fileB64) {
+      return res.status(400).json({ error: "Faltan parámetros: mediaKey y file" });
     }
+
+    const mediaKey = Buffer.from(mediaKeyB64, "base64");
+    const expandedKey = hkdf(mediaKey, "WhatsApp Audio Keys");
+    const iv = expandedKey.subarray(0, 16);
+    const cipherKey = expandedKey.subarray(16, 48);
+
+    const encBuffer = Buffer.from(fileB64, "base64");
+    const fileData = encBuffer.subarray(0, encBuffer.length - 10);
+
+    const decipher = crypto.createDecipheriv("aes-256-cbc", cipherKey, iv);
+    const decrypted = Buffer.concat([decipher.update(fileData), decipher.final()]);
+
+    res.json({
+      mimeType: "audio/ogg",
+      fileName: "audio.ogg",
+      data: decrypted.toString("base64"),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/", (req, res) => {
+  res.send("WhatsApp Audio Decrypt API funcionando ✅");
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor iniciado en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
